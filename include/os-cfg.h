@@ -15,7 +15,7 @@
 #define MAX_PRIO 140
 
 #define MM_PAGING
-#define MM_FIXED_MEMSZ // comment dong nay de chay 
+//#define MM_FIXED_MEMSZ // comment dong nay de chay 
 /*./os os_syscall
 ./os os_syscall_list
 ./os os_sc
