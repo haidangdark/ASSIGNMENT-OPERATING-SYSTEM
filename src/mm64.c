@@ -580,14 +580,14 @@ int init_mm(struct mm_struct *mm, struct pcb_t *caller) //NHÓM 5
 
   /*project có các cấp p4d/pud/pmd/pt là con trỏ, 
      có thể set NULL ở đây; khi nào cần mới cấp phát thật sự. */
-  // mm->p4d = NULL;
-  // mm->pud = NULL;
-  // mm->pmd = NULL;
-  // mm->pt  = NULL;
-  mm->p4d = (typeof(mm->p4d))calloc(PAGING_MAX_PGN, sizeof(uint64_t));
-  mm->pud = (typeof(mm->pud))calloc(PAGING_MAX_PGN, sizeof(uint64_t));
-  mm->pmd = (typeof(mm->pmd))calloc(PAGING_MAX_PGN, sizeof(uint64_t));
-  mm->pt  = (typeof(mm->pt))calloc(PAGING_MAX_PGN, sizeof(uint64_t));
+  mm->p4d = NULL;
+  mm->pud = NULL;
+  mm->pmd = NULL;
+  mm->pt  = NULL;
+  // mm->p4d = (typeof(mm->p4d))calloc(PAGING_MAX_PGN, sizeof(uint64_t));
+  // mm->pud = (typeof(mm->pud))calloc(PAGING_MAX_PGN, sizeof(uint64_t));
+  // mm->pmd = (typeof(mm->pmd))calloc(PAGING_MAX_PGN, sizeof(uint64_t));
+  // mm->pt  = (typeof(mm->pt))calloc(PAGING_MAX_PGN, sizeof(uint64_t));
 
   /* By default the owner comes with at least one vma */
   vma0->vm_id = 0;

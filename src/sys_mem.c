@@ -32,10 +32,10 @@ int __sys_memmap(struct krnl_t *krnl, uint32_t pid, struct sc_regs* regs)
 	*/
     struct pcb_t *caller = NULL;
     for (int i = 0; i < krnl->running_list->size; i++) {
-      if (krnl->running_list->proc[i]->pid == pid) {
-        caller = krnl->running_list->proc[i];
-        break;
-    }
+        if (krnl->running_list->proc[i]->pid == pid) {
+            caller = krnl->running_list->proc[i];
+            break;
+        }
     }
 
    /*
