@@ -373,7 +373,7 @@ int libfree(struct pcb_t *proc, uint32_t reg_index)
   if (proc->regs[reg_index] == 0) {
       return -1;
   }
-  int val = __free(proc, 0, reg_index);
+  //int val = __free(proc, 0, reg_index);
 #ifdef IODUMP
   /* TODO dump IO content (if needed) */
   printf("libfree:218\n");
@@ -456,6 +456,7 @@ int pg_getpage(struct mm_struct *mm, int pgn, int *fpn, struct pcb_t *caller)
  */
 int pg_getval(struct mm_struct *mm, int addr, BYTE *data, struct pcb_t *caller)
 {
+  if (data == NULL) return -1;
   int pgn = PAGING_PGN(addr);
 //  int off = PAGING_OFFST(addr);
   int fpn;
@@ -476,8 +477,17 @@ int pg_getval(struct mm_struct *mm, int addr, BYTE *data, struct pcb_t *caller)
  
   int off = PAGING_OFFST(addr);
   int phyaddr = (fpn * PAGING_PAGESZ) + off;
-  if (MEMPHY_read(caller->krnl->mram, phyaddr, data) != 0)
-    return -1;
+/* GỌI SYSCALL ĐỂ ĐỌC (User không chạm vào RAM) */
+  struct sc_regs regs;
+  regs.a1 = SYSMEM_IO_READ;
+  regs.a2 = phyaddr;
+  regs.a3 = 0; // Reset thanh ghi nhận kết quả
+  
+  // Gọi kernel
+  syscall(caller->krnl, caller->pid, 17, &regs);
+  
+  /* Lấy kết quả kernel trả về trong a3 */
+  *data = (BYTE)regs.a3;
   return 0;
 }
 
@@ -489,6 +499,7 @@ int pg_getval(struct mm_struct *mm, int addr, BYTE *data, struct pcb_t *caller)
  */
 int pg_setval(struct mm_struct *mm, int addr, BYTE value, struct pcb_t *caller)
 {
+
   int pgn = PAGING_PGN(addr);
 //  int off = PAGING_OFFST(addr);
   int fpn;
@@ -508,8 +519,13 @@ int pg_setval(struct mm_struct *mm, int addr, BYTE value, struct pcb_t *caller)
    */
   int off = PAGING_OFFST(addr);
   int phyaddr = (fpn * PAGING_PAGESZ) + off;
-  if (MEMPHY_write(caller->krnl->mram, phyaddr, value) != 0)
-    return -1;
+/* GỌI SYSCALL ĐỂ GHI */
+  struct sc_regs regs;
+  regs.a1 = SYSMEM_IO_WRITE;
+  regs.a2 = phyaddr;
+  regs.a3 = (arg_t)value; // Truyền giá trị cần ghi
+  
+  syscall(caller->krnl, caller->pid, 17, &regs);
 
   return 0;
 }
@@ -698,6 +714,10 @@ int free_pcb_memph(struct pcb_t *caller)
   for (pagenum = 0; pagenum < PAGING_MAX_PGN; pagenum++)
   {
     pte = caller->krnl->mm->pgd[pagenum];
+    if (pte == 0) {
+      // trang chưa bao giờ dùng → không có gì để trả
+      continue;
+    }
 
     if (PAGING_PAGE_PRESENT(pte))
     {

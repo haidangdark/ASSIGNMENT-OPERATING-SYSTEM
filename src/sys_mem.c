@@ -31,12 +31,15 @@ int __sys_memmap(struct krnl_t *krnl, uint32_t pid, struct sc_regs* regs)
     *      need to be eliminated
 	*/
     struct pcb_t *caller = NULL;
-    for (int i = 0; i < krnl->running_list->size; i++) {
-        if (krnl->running_list->proc[i]->pid == pid) {
-            caller = krnl->running_list->proc[i];
+    struct queue_t *running_list = krnl->running_list;
+    if (!running_list) return -1;
+    for (int i = 0; i < running_list->size; i++) {
+        if (running_list->proc[i] && running_list->proc[i]->pid == pid) {
+            caller = running_list->proc[i];
             break;
         }
     }
+    if (caller == NULL) { return -1; }
 
    /*
     * @bksysnet: Please note in the dual spacing design
@@ -46,24 +49,24 @@ int __sys_memmap(struct krnl_t *krnl, uint32_t pid, struct sc_regs* regs)
    /* TODO: Traverse proclist to terminate the proc
     *       stcmp to check the process match proc_name
     */
-	struct queue_t *running_list = krnl->running_list;
+	
 
     /* TODO Maching and marking the process */
     /* user process are not allowed to access directly pcb in kernel space of syscall */
     //....
 
-    int check = 0;
-    for (int i = 0; i < running_list->size; i++) {
-        if (running_list->proc[i]->pid == pid) {
-            caller = running_list->proc[i];
-            check = 1;
-            break;
-        }
-    }
-    if (!check) {
-        free(caller);
-        return -1;
-    }
+    // int check = 0;
+    // for (int i = 0; i < running_list->size; i++) {
+    //     if (running_list->proc[i]->pid == pid) {
+    //         caller = running_list->proc[i];
+    //         check = 1;
+    //         break;
+    //     }
+    // }
+    // if (!check) {
+    //     free(caller);
+    //     return -1;
+    // }
 	
    switch (memop) {
    case SYSMEM_MAP_OP:
@@ -77,10 +80,15 @@ int __sys_memmap(struct krnl_t *krnl, uint32_t pid, struct sc_regs* regs)
             __mm_swap_page(caller, regs->a2, regs->a3);
             break;
    case SYSMEM_IO_READ:
+            // MEMPHY_read(caller->krnl->mram, regs->a2, &value);
+            // regs->a3 = value;
+            // break;
+            if (!caller->krnl || !caller->krnl->mram) return -1;
             MEMPHY_read(caller->krnl->mram, regs->a2, &value);
             regs->a3 = value;
             break;
    case SYSMEM_IO_WRITE:
+            if (!caller->krnl || !caller->krnl->mram) return -1;
             MEMPHY_write(caller->krnl->mram, regs->a2, regs->a3);
             break;
    default:
