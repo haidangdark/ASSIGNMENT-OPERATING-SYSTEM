@@ -169,30 +169,16 @@ struct pcb_t *dequeue(struct queue_t *q)
         // return highest;
 #ifdef MLQ_SCHED
         /* MLQ: Tìm process có priority cao nhất (chỉ số nhỏ nhất) */
-        int highest_prio = 9999;
-        int idx = -1;
+        struct pcb_t *first = q->proc[0];
+
+        /* Dịch chuyển các phần tử */
         int i;
-
-        for (i = 0; i < q->size; i++) {
-                int prio = q->proc[i]->prio;
-                if (prio < highest_prio) {
-                        highest_prio = prio;
-                        idx = i;
-                }
-        }
-
-        if (idx == -1)
-                return NULL;
-
-        struct pcb_t *selected = q->proc[idx];
-
-        /* Xóa phần tử tại idx */
-        for (i = idx; i < q->size - 1; i++) {
+        for (i = 0; i < q->size - 1; i++) {
                 q->proc[i] = q->proc[i + 1];
         }
         q->size--;
 
-        return selected;
+        return first;
 #else
         /* FIFO: Lấy phần tử đầu tiên */
         struct pcb_t *first = q->proc[0];

@@ -81,6 +81,7 @@ static struct queue_t running_list;
 #ifdef MLQ_SCHED
 static struct queue_t mlq_ready_queue[MAX_PRIO];
 static int slot[MAX_PRIO];
+
 #endif
 
 int queue_empty(void) {
@@ -191,6 +192,40 @@ struct pcb_t * get_mlq_proc(void) { // ham nay dung de lay tu hang doi (queue.h)
 		}
 	}
 
+	/* Bước 2: Cơ chế phục hồi Slot (Reset Mechanism)
+     * Nếu không tìm thấy tiến trình nào (proc == NULL) nhưng hệ thống không rỗng
+     * (tức là vẫn còn tiến trình nhưng chúng đang nằm trong các hàng đợi đã hết slot),
+     * ta cần nạp lại slot cho tất cả các hàng đợi.
+     */
+    if (proc == NULL) {
+        // Kiểm tra xem có hàng đợi nào còn tiến trình không
+        int have_process = 0;
+        for (int i = 0; i < MAX_PRIO; i++) {
+            if (!empty(&mlq_ready_queue[i])) {
+                have_process = 1;
+                break;
+            }
+        }
+
+        // Nếu còn tiến trình mà không lấy được (do hết slot), ta reset slot
+        if (have_process) {
+            for (int i = 0; i < MAX_PRIO; i++) {
+                slot[i] = MAX_PRIO - i; // Nạp lại slot theo công thức ban đầu
+            }
+
+            // Quét lại lần 2 sau khi đã nạp đầy năng lượng
+            for (int prio = 0; prio < MAX_PRIO; prio++){
+                if (slot[prio] > 0 && !empty(&mlq_ready_queue[prio])){
+                    proc = dequeue(&mlq_ready_queue[prio]);
+                    if (proc != NULL){
+                        slot[prio]--;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
 
 
 
@@ -238,6 +273,7 @@ void put_mlq_proc(struct pcb_t * proc) { // dua lai vao hang doi dung prio, giam
 	 * 
 	 */
 	pthread_mutex_lock(&queue_lock);
+	purgequeue(&running_list, proc);
 
 
 	int prio = proc->prio;
@@ -258,6 +294,11 @@ void put_mlq_proc(struct pcb_t * proc) { // dua lai vao hang doi dung prio, giam
 	//cua thay
 	
 	enqueue(&mlq_ready_queue[proc->prio], proc);
+	// purgequeue(&running_list, proc);
+    
+    // if (proc->prio >= 0 && proc->prio < MAX_PRIO) {
+    //     enqueue(&mlq_ready_queue[proc->prio], proc);
+    // }
 	pthread_mutex_unlock(&queue_lock);
 }
 
@@ -292,7 +333,7 @@ void add_mlq_proc(struct pcb_t * proc) {//them moi vao hang doi dung prio
        
 	pthread_mutex_lock(&queue_lock);
 
-	int prio = proc->priority; // proc->prio la cai ma sau khi qua xu ly dc gan lai, con priority se la cai ma minh tu gan ban dau
+	int prio = proc->prio; // proc->prio la cai ma sau khi qua xu ly dc gan lai, con priority se la cai ma minh tu gan ban dau
 	if (prio < 0) prio = 0;
 	if (prio >= MAX_PRIO) prio = MAX_PRIO - 1;
 

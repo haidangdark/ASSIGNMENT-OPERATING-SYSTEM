@@ -375,6 +375,9 @@ int init_mm(struct mm_struct *mm, struct pcb_t *caller) //NHÓM 5
 {
   (void)caller;
   struct vm_area_struct *vma0 = malloc(sizeof(struct vm_area_struct));
+  if (vma0 == NULL) {
+    return -1;
+  }
 
   /* TODO init page table directory */
    //mm->pgd = ...
@@ -387,10 +390,14 @@ int init_mm(struct mm_struct *mm, struct pcb_t *caller) //NHÓM 5
 
   /*project có các cấp p4d/pud/pmd/pt là con trỏ, 
      có thể set NULL ở đây; khi nào cần mới cấp phát thật sự. */
-  mm->p4d = NULL;
-  mm->pud = NULL;
-  mm->pmd = NULL;
-  mm->pt  = NULL;
+  // mm->p4d = NULL;
+  // mm->pud = NULL;
+  // mm->pmd = NULL;
+  // mm->pt  = NULL;
+  mm->p4d = (typeof(mm->p4d))calloc(PAGING_MAX_PGN, sizeof(uint64_t));
+  mm->pud = (typeof(mm->pud))calloc(PAGING_MAX_PGN, sizeof(uint64_t));
+  mm->pmd = (typeof(mm->pmd))calloc(PAGING_MAX_PGN, sizeof(uint64_t));
+  mm->pt  = (typeof(mm->pt))calloc(PAGING_MAX_PGN, sizeof(uint64_t));
 
   /* By default the owner comes with at least one vma */
   vma0->vm_id = 0;
@@ -538,17 +545,13 @@ int print_list_pgn(struct pgn_t *ip)
 
 int print_pgtbl(struct pcb_t *caller, addr_t start, addr_t end)
 {
-//  ... (giữ nguyên TODO)
-  addr_t pgd=0;
-  addr_t p4d=0;
-  addr_t pud=0;
-  addr_t pmd=0;
-  addr_t pt=0;
-
-  get_pd_from_address(start, &pgd, &p4d, &pud, &pmd, &pt);
-
-  /* TODO traverse the page map and dump the page directory entries */
-
+  if (caller->krnl && caller->krnl->mm) {
+    printf("print_pgtbl:\n PDG=%lx P4g=%lx PUD=%lx PMD=%lx\n", 
+           (addr_t)caller->krnl->mm->pgd,
+           (addr_t)caller->krnl->mm->p4d, 
+           (addr_t)caller->krnl->mm->pud,
+           (addr_t)caller->krnl->mm->pmd);
+  }
   return 0;
 }
 
