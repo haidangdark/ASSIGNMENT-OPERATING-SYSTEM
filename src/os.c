@@ -93,8 +93,10 @@ static void * cpu_routine(void * args) {
 		}
 		
 		/* Run current process */
-		run(proc);
-		time_left--;
+		if (proc != NULL) {
+			run(proc);
+			time_left--;
+		}
 		next_slot(timer_id);
 	}
 	detach_event(timer_id);
@@ -165,6 +167,17 @@ static void read_config(const char * path) {
         memswpsz[0] = 0x1000000;
 	for(sit = 1; sit < PAGING_MAX_MMSWP; sit++)
 		memswpsz[sit] = 0;
+	long current_pos = ftell(file);
+	int first_num, second_num;
+	
+	if (fscanf(file, "%d %d", &first_num, &second_num) == 2) {
+		// Đọc đến hết dòng
+		int ch;
+		while ((ch = fgetc(file)) != '\n' && ch != EOF);
+	} else {
+		// Không phải memory sizes, quay lại vị trí cũ
+		fseek(file, current_pos, SEEK_SET);
+	}
 #else
 	/* Read input config of memory size: MEMRAM and upto 4 MEMSWP (mem swap)
 	 * Format: (size=0 result non-used memswap, must have RAM and at least 1 SWAP)
@@ -195,6 +208,7 @@ static void read_config(const char * path) {
 #endif
 		strcat(ld_processes.path[i], proc);
 	}
+	fclose(file);
 }
 
 int main(int argc, char * argv[]) {

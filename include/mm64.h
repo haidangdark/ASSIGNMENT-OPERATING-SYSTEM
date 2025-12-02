@@ -12,7 +12,21 @@
 
 #define PAGING64_MAX_PGN  (DIV_ROUND_UP(BIT_ULL(21),PAGING64_PAGESZ))
 #define PAGING64_PAGE_ALIGNSZ(sz) (DIV_ROUND_UP(sz,PAGING64_PAGESZ)*PAGING64_PAGESZ)
+/* --- [NEW] ĐỊNH NGHĨA KÍCH THƯỚC CÁC BẢNG TRANG --- */
+/* Mỗi bảng trang (PGD, P4D...) có 512 dòng (2^9) */
+#define PAGING64_PGD_CNT  (1 << 9) 
+#define PAGING64_P4D_CNT  (1 << 9)
+#define PAGING64_PUD_CNT  (1 << 9)
+#define PAGING64_PMD_CNT  (1 << 9)
+#define PAGING64_PT_CNT   (1 << 9)
 
+/* --- [NEW] CÁC MACRO KIỂM TRA TRẠNG THÁI PTE 64-BIT --- */
+/* Kiểm tra bit PRESENT (Dùng mask từ mm.h vì vị trí bit thường giống nhau) */
+#define PAGING64_PTE_PRESENT(pte)    ((pte) & PAGING_PTE_PRESENT_MASK)
+#define PAGING64_PTE_SWAPPED(pte)    ((pte) & PAGING_PTE_SWAPPED_MASK)
+
+/* Macro lấy FPN từ PTE 64-bit */
+#define PAGING64_PTE_FPN(pte)        ((pte) & PAGING_PTE_FPN_MASK)
 
 /* OFFSET */
 #define PAGING64_ADDR_OFFST_HIBIT 11

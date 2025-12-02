@@ -44,5 +44,8 @@
  */
 #define MM64 1
 //#undef MM64
+#define DEFAULT_CONFIG_PATH "input/cfg/" 
+#define DEFAULT_PROC_PATH "input/proc/"
+#define SIMPLE_CONFIG_MODE 1
 
 #endif
