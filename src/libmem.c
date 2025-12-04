@@ -354,7 +354,7 @@ int liballoc(struct pcb_t *proc, addr_t size, uint32_t reg_index)
 #ifdef IODUMP
   /* TODO dump IO content (if needed) */
   printf("liballoc:178\n");
-  print_pgtbl(proc, 0, 0); 
+  print_pgtbl(proc, addr, 0); 
 
 #endif
 
@@ -377,7 +377,8 @@ int libfree(struct pcb_t *proc, uint32_t reg_index)
 #ifdef IODUMP
   /* TODO dump IO content (if needed) */
   printf("libfree:218\n");
-  print_pgtbl(proc, 0, 0);
+  addr_t addr = proc->regs[reg_index];
+  print_pgtbl(proc, addr, 0);
 #endif
   return 0;//val;
 }
@@ -617,8 +618,20 @@ int libread(
 
   *destination = data;
 #ifdef IODUMP
-  printf("libread:426\n");
-  print_pgtbl(proc, 0, 0);
+  
+  //print_pgtbl(proc, 0, 0);
+  /*Tính địa chỉ ảo để in ra */
+  struct vm_rg_struct *currg = get_symrg_byid(proc->krnl->mm, source);
+  if (currg) {
+      addr_t vaddr = currg->rg_start + offset;
+      //printf("libread: Reading at vaddr = " FORMAT_ADDR "\n", vaddr);
+      printf("libread:426\n");
+      
+      /* Truyền vaddr vào để print_pgtbl dò đúng đường đi */
+      print_pgtbl(proc, vaddr, 0); 
+  } else {
+      printf("libread: Invalid region ID %d\n", source);
+  }
 #endif
 
   return val;
@@ -680,8 +693,20 @@ int libwrite(
     return -1;
   }
 #ifdef IODUMP
-  printf("libwrite:502\n");
-  print_pgtbl(proc, 0, 0);
+  
+  //print_pgtbl(proc, 0, 0);
+  /* Tính địa chỉ ảo để in ra */
+  struct vm_rg_struct *currg = get_symrg_byid(proc->krnl->mm, destination);
+  if (currg) {
+      addr_t vaddr = currg->rg_start + offset;
+      //printf("libwrite: Writing to vaddr = " FORMAT_ADDR " [val=0x%02x]\n", vaddr, data);
+      printf("libwrite:502\n");
+
+      /* Truyền vaddr vào để print_pgtbl dò đúng đường đi */
+      print_pgtbl(proc, vaddr, 0);
+  } else {
+      printf("libwrite: Invalid region ID %d\n", destination);
+  }
 #endif
 
   return val;

@@ -739,13 +739,69 @@ int print_list_pgn(struct pgn_t *ip)
 
 int print_pgtbl(struct pcb_t *caller, addr_t start, addr_t end)
 {
-  if (caller->krnl && caller->krnl->mm) {
-    printf("print_pgtbl:\n PDG=%lx P4g=%lx PUD=%lx PMD=%lx\n", 
-           (addr_t)caller->krnl->mm->pgd,
-           (addr_t)caller->krnl->mm->p4d, 
-           (addr_t)caller->krnl->mm->pud,
-           (addr_t)caller->krnl->mm->pmd);
+  // if (caller->krnl && caller->krnl->mm) {
+  //   printf("print_pgtbl:\n PDG=%lx P4g=%lx PUD=%lx PMD=%lx\n", 
+  //          (addr_t)caller->krnl->mm->pgd,
+  //          (addr_t)caller->krnl->mm->p4d, 
+  //          (addr_t)caller->krnl->mm->pud,
+  //          (addr_t)caller->krnl->mm->pmd);
+  // }
+  // return 0;
+  /* Guard check */
+  if (!caller || !caller->krnl || !caller->krnl->mm) return -1;
+
+  struct krnl_t *krnl = caller->krnl;
+  struct mm_struct *mm = krnl->mm;
+  
+  
+  addr_t pgd_idx, p4d_idx, pud_idx, pmd_idx, pt_idx;
+
+ 
+  if (get_pd_from_address(start, &pgd_idx, &p4d_idx, &pud_idx, &pmd_idx, &pt_idx) != 0) {
+      return 0;
   }
+
+  printf("print_pgtbl (Virtual Address: %016lx):\n", (uint64_t)start);
+
+
+  printf("  PGD Table: %016lx\n", (uint64_t)mm->pgd);
+
+  if (!PAGING64_PTE_PRESENT(mm->pgd[pgd_idx])) {
+      printf("  P4D Table: [Not Allocated / Not Present]\n");
+      return 0;
+  }
+
+
+  addr_t fpn_p4d = PAGING64_PTE_FPN(mm->pgd[pgd_idx]);
+ 
+  addr_t *tbl_p4d = (addr_t *)(krnl->mram->storage + (fpn_p4d * PAGING_PAGESZ));
+  
+  printf("  P4D Table: %016lx (Frame: %ld)\n", (uint64_t)tbl_p4d, (uint64_t)fpn_p4d);
+
+  if (!PAGING64_PTE_PRESENT(tbl_p4d[p4d_idx])) {
+      printf("  PUD Table: [Not Allocated / Not Present]\n");
+      return 0;
+  }
+
+  
+  addr_t fpn_pud = PAGING64_PTE_FPN(tbl_p4d[p4d_idx]);
+  addr_t *tbl_pud = (addr_t *)(krnl->mram->storage + (fpn_pud * PAGING_PAGESZ));
+  
+  printf("  PUD Table: %016lx (Frame: %ld)\n", (uint64_t)tbl_pud, (uint64_t)fpn_pud);
+
+  if (!PAGING64_PTE_PRESENT(tbl_pud[pud_idx])) {
+      printf("  PMD Table: [Not Allocated / Not Present]\n");
+      return 0;
+  }
+
+
+  addr_t fpn_pmd = PAGING64_PTE_FPN(tbl_pud[pud_idx]);
+  addr_t *tbl_pmd = (addr_t *)(krnl->mram->storage + (fpn_pmd * PAGING_PAGESZ));
+  
+  printf("  PMD Table: %016lx (Frame: %ld)\n", (uint64_t)tbl_pmd, (uint64_t)fpn_pmd);
+
+ 
+  
   return 0;
 }
 

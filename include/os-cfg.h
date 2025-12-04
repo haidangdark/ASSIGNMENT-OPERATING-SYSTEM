@@ -29,7 +29,7 @@
 //con uncomment thi chay 
 /*./os sched
 ./os sched_0
-./os sched_1
+./os sched_0
 ./os os_1_singleCPU_mlq*/
 //#define VMDBG 1
 //#define MMDBG 1
