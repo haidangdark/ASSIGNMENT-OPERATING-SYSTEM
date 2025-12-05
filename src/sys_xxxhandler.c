@@ -1,159 +1,195 @@
- /*================================================================================================================================================================================*/
-/*=============================================================================ĐỌC TỪ ĐÂY NHA MN===================================================================================*/
- /*================================================================================================================================================================================*/
-
 /*
-Chức năng tổng quan của sys_xxxhandler.c
-Đây là Trình xử lý (Handler) cho lời gọi hệ thống (system call) tùy chỉnh . Dựa trên syscall.tbl, nó được đăng ký với số hiệu 440.
-Khi một tiến trình (Process) ở chế độ người dùng (userspace) thực thi lệnh syscall 440, kernel sẽ:
-    1. Ngắt (trap) vào chế độ kernel.
+ * Copyright (C) 2026 pdnguyen of HCMC University of Technology VNU-HCM
+ */
 
-    2. Tra cứu bảng syscall_table.
+/* LamiaAtrium release
+ * Source Code License Grant: The authors hereby grant to Licensee
+ * personal permission to use and modify the Licensed Source Code
+ * for the sole purpose of studying while attending the course CO2018.
+ */
 
-    3. Tìm thấy số 440 và gọi hàm __sys_xxxhandler (trong file này) để thực thi.
-
-Chức năng cụ thể đã triển khai trong hàm này là:
-
-    In tham số: In ra giá trị của tham số đầu tiên mà tiến trình truyền vào.
-
-    Thống kê (Stats): Đếm và báo cáo số lần syscall này được gọi, bao gồm tổng số lần và số lần gọi bởi từng PID (Process ID) riêng biệt.
-
-Các thư viện và Header liên quan
-1. "common.h": Cung cấp các định nghĩa cơ bản nhất như struct krnl_t, kiểu arg_t và quan trọng là macro FORMAT_ARG. Macro này đảm bảo printf có thể in đúng kiểu dữ liệu 32-bit (%u) hay 64-bit (%lu) tùy theo cấu hình biên dịch.
-
-2. "syscall.h": Cung cấp định nghĩa của struct sc_regs. Đây là cấu trúc dùng để truyền các tham số (giả lập thanh ghi) từ userspace vào kernel.
-
-3. <stdio.h>: Thư viện chuẩn C, cần thiết cho hàm printf để in thông báo ra console.
-
-4. <stdint.h>: Cung cấp các kiểu dữ liệu có kích thước cố định, ví dụ uint64_t được dùng cho total_calls để đảm bảo bộ đếm không bị tràn số sớm.
-
-*/
 #include "common.h"
 #include "syscall.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
+#include "mm64.h"
+#include "queue.h" 
 
+/* --- [OVERRIDE] GHI ĐÈ CẤU HÌNH CHO CHẾ ĐỘ 64-BIT --- */
+#ifdef MM64
+  /* 1. Ghi đè kích thước trang (4096 thay vì 256) */
+  #undef PAGING_PAGESZ
+  #define PAGING_PAGESZ PAGING64_PAGESZ 
 
-/* sys_xxxhandler: syscall demo + thống kê lượt gọi theo PID và tổng lượt gọi.
- *
- * Prototype phải khớp cơ chế dispatch trong syscall.c:
- *   extern int __sym(struct krnl_t*, uint32_t pid, struct sc_regs*);
- * (syscall() dùng switch + __SYSCALL macro để gọi theo đúng prototype này)
+  /* 2. Ghi đè các macro bit để dùng chung logic */
+  #undef PAGING_PTE_FPN
+  #define PAGING_PTE_FPN(pte) PAGING64_PTE_FPN(pte)
+  
+  #undef PAGING_PTE_PRESENT
+  #define PAGING_PTE_PRESENT(pte) PAGING64_PTE_PRESENT(pte)
+
+  #undef PAGING_PTE_SWAPPED
+  #define PAGING_PTE_SWAPPED(pte) PAGING64_PTE_SWAPPED(pte)
+#endif
+/* --------------------------------------------------- */
+
+/* Macro tính địa chỉ vật lý: Dùng PAGING_PAGESZ (Lúc này đã là 4096 nhờ Override) */
+#define PHY_ADDR(krnl, fpn) \
+  ((uint64_t *)((char *)(krnl)->mram->storage + ((fpn) * PAGING_PAGESZ)))
+
+/* * print_mm_stats - Thống kê chi tiết bộ nhớ của tiến trình
+ * Duyệt cây bảng trang 5 cấp
  */
-
-
- /*
- Tham số:
-
-    struct krnl_t *krnl: Con trỏ tới cấu trúc kernel chính. Hàm này không dùng đến nó, nên có lệnh (void)krnl; để tránh cảnh báo (warning) của trình biên dịch.
-
-    uint32_t pid: ID của tiến trình đã gọi syscall này.
-
-    struct sc_regs *regs: Con trỏ tới cấu trúc chứa các tham số. regs->a1 là tham số thứ nhất, regs->a2 là thứ hai, v.v..
-
-Logic Thống kê (Phần quan trọng nhất):
-
-    Để theo dõi số lần gọi, hàm sử dụng các biến static. Biến static có nghĩa là giá trị của chúng được lưu giữ vĩnh viễn qua các lần gọi hàm (chúng không bị mất đi khi hàm kết thúc).
-
-        static unsigned long long total_calls = 0ULL;
-        enum { MAX_SLOTS = 64 };
-        static struct { ... } slots[MAX_SLOTS];
-
-
-    1. static unsigned long long total_calls = 0ULL;: Khai báo biến đếm tổng số lần gọi. Biến này được khởi tạo bằng 0 ở lần chạy đầu tiên và tăng dần sau mỗi lần gọi syscall 440.
-
-    2. static struct { ... } slots[MAX_SLOTS];: Khai báo một mảng "cache" gồm 64 slot để đếm số lần gọi theo từng pid.
-
-    3. Vòng lặp for (Tìm kiếm slot):
-
-        Hàm duyệt qua 64 slot.
-
-        Nó tìm xem pid hiện tại đã được lưu trong slot nào chưa (if (slots[i].used && slots[i].pid == pid)).
-
-        Đồng thời, nó cũng tìm một slot trống (if (!slots[i].used && free_idx < 0)) để dành, phòng trường hợp đây là pid mới.
-
-    4. Xử lý Slot:
-
-        Nếu pid mới (found_idx < 0):
-
-            Nếu còn slot trống (free_idx >= 0), nó sẽ dùng slot trống đó.
-
-            Nếu hết slot trống (free_idx < 0), nó sẽ tái sử dụng (ghi đè) slot 0. Đây là một chiến lược thay thế cache đơn giản.
-
-            Sau đó, nó khởi tạo slot (.pid = pid, .cnt = 0, .used = 1).
-
-        Cuối cùng: slots[found_idx].cnt++;: Tăng bộ đếm cho pid này.
-
-Logic Xử lý chính:
-
-    1. printf("The first system call parameter " FORMAT_ARG "\n", (arg_t)regs->a1);
-
-        Đây là hành động chính của syscall: nó lấy tham số đầu tiên (regs->a1) từ tiến trình và in ra màn hình.
-
-    2. printf("[sys_xxxhandler] pid=%u | pid_calls=%llu | total_calls=%llu\n", ...);
-
-        In ra thông tin thống kê: PID nào vừa gọi, PID đó đã gọi (syscall 440) bao nhiêu lần, và tổng số lần (syscall 440) đã được gọi bởi tất cả các PID.
-
-    3. return 0;
-
-        Trả về 0 để báo cho kernel biết rằng syscall đã thực thi thành công.
-    
- */
-int __sys_xxxhandler(struct krnl_t *krnl, uint32_t pid, struct sc_regs *regs)
+static void 
+print_mm_stats (struct krnl_t *krnl, struct pcb_t *proc)
 {
-    (void)krnl; /* hiện tại không cần dùng đến kernel pointer */
+  struct mm_struct *mm = proc->krnl->mm;
+  int i_pgd, i_p4d, i_pud, i_pmd;
+  
+  int cnt_pgd = 0, cnt_p4d = 0, cnt_pud = 0, cnt_pmd = 0, cnt_pt = 0;
+  int pages_in_ram = 0;
+  int pages_swapped = 0;
 
-    /* Thống kê đơn giản, lưu nội bộ ở handler :
-       - total_calls: tổng số lần syscall này được gọi
-       - per-pid: đếm số lần theo từng PID (bảng nhỏ, linear search) */
-    static unsigned long long total_calls = 0ULL;
+  printf ("[MMSTATS] === MEMORY STRUCTURE DEBUG ===\n");
+  printf ("[MMSTATS] mm_struct: %p\n", (void *)mm);
 
-    enum { MAX_SLOTS = 64 };
-    static struct {
-        uint32_t pid;
-        unsigned long long cnt;
-        int used;
-    } slots[MAX_SLOTS];
+#ifdef MM64
+  printf ("[MMSTATS] pgd (Virtual): %p\n", (void *)mm->pgd);
 
-    /* Tăng tổng lượt gọi */
-    total_calls++;
+  /* 1. Duyệt PGD (Level 5) */
+  for (i_pgd = 0; i_pgd < PAGING64_PGD_CNT; i_pgd++)
+    {
+      if (PAGING_PTE_PRESENT (mm->pgd[i_pgd]))
+        {
+          cnt_pgd++;
+          
+          /* Lấy P4D từ RAM */
+          addr_t fpn_p4d = PAGING_PTE_FPN (mm->pgd[i_pgd]);
+          uint64_t *tbl_p4d = PHY_ADDR (krnl, fpn_p4d);
+          
+          /* 2. Duyệt P4D (Level 4) */
+          for (i_p4d = 0; i_p4d < PAGING64_P4D_CNT; i_p4d++)
+            {
+              if (PAGING_PTE_PRESENT (tbl_p4d[i_p4d]))
+                {
+                  cnt_p4d++;
+                  
+                  /* Lấy PUD */
+                  addr_t fpn_pud = PAGING_PTE_FPN (tbl_p4d[i_p4d]);
+                  uint64_t *tbl_pud = PHY_ADDR (krnl, fpn_pud);
 
-    /* Tìm/ghi nhận slot theo PID */
-    int i, free_idx = -1, found_idx = -1;
-    for (i = 0; i < MAX_SLOTS; ++i) {
-        if (slots[i].used && slots[i].pid == pid) {
-            found_idx = i;
-            break;
+                  /* 3. Duyệt PUD (Level 3) */
+                  for (i_pud = 0; i_pud < PAGING64_PUD_CNT; i_pud++)
+                    {
+                      if (PAGING_PTE_PRESENT (tbl_pud[i_pud]))
+                        {
+                          cnt_pud++;
+                          
+                          /* Lấy PMD */
+                          addr_t fpn_pmd = PAGING_PTE_FPN (tbl_pud[i_pud]);
+                          uint64_t *tbl_pmd = PHY_ADDR (krnl, fpn_pmd);
+
+                          /* 4. Duyệt PMD (Level 2) */
+                          for (i_pmd = 0; i_pmd < PAGING64_PMD_CNT; i_pmd++)
+                            {
+                              if (PAGING_PTE_PRESENT (tbl_pmd[i_pmd]))
+                                {
+                                  cnt_pmd++;
+                                  
+                                  /* Lấy PT */
+                                  addr_t fpn_pt = PAGING_PTE_FPN (tbl_pmd[i_pmd]);
+                                  uint64_t *tbl_pt = PHY_ADDR (krnl, fpn_pt);
+
+                                  /* 5. Đếm số trang trong PT (Level 1) */
+                                  int k;
+                                  for (k = 0; k < PAGING64_PT_CNT; k++)
+                                    {
+                                      if (PAGING_PTE_PRESENT (tbl_pt[k]))
+                                        {
+                                          cnt_pt++;
+                                          pages_in_ram++;
+                                        }
+                                      else if (PAGING_PTE_SWAPPED (tbl_pt[k]))
+                                        {
+                                          cnt_pt++; 
+                                          pages_swapped++;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
-        if (!slots[i].used && free_idx < 0)
-            free_idx = i;
     }
-    if (found_idx < 0) {
-        if (free_idx < 0) {
-            /* Hết slot -> tái sử dụng slot 0 (đơn giản) */
-            found_idx = 0;
-            slots[0].pid = pid;
-            slots[0].cnt = 0;
-            slots[0].used = 1;
-        } else {
-            found_idx = free_idx;
-            slots[found_idx].pid = pid;
-            slots[found_idx].cnt = 0;
-            slots[found_idx].used = 1;
-        }
+
+  printf ("[MMSTATS] 64-bit paging structures analysis:\n");
+  printf ("[MMSTATS] Count PGD entries used: %d/%d\n", cnt_pgd, PAGING64_PGD_CNT);
+  printf ("[MMSTATS] Count P4D entries used: %d\n", cnt_p4d);
+  printf ("[MMSTATS] Count PUD entries used: %d\n", cnt_pud);
+  printf ("[MMSTATS] Count PMD entries used: %d\n", cnt_pmd);
+  printf ("[MMSTATS] Count PT (Data Pages):  %d\n", pages_in_ram + pages_swapped);
+
+#endif /* MM64 */
+  
+  struct vm_area_struct *vma = mm->mmap;
+  if (vma) 
+    {
+      printf ("[MMSTATS] VM Area 0: start=0x%lx - end=0x%lx (size: %lu bytes)\n", 
+              (unsigned long)vma->vm_start, 
+              (unsigned long)vma->vm_end, 
+              (unsigned long)(vma->vm_end - vma->vm_start));
+      printf ("[MMSTATS] VMA 0: vm_id=%lu, sbrk=0x%lx\n", vma->vm_id, (unsigned long)vma->sbrk);
     }
-    slots[found_idx].cnt++;
 
-    /* In tham số thứ nhất (regs->a1) theo định dạng kiến trúc (32/64-bit) */
-    printf("The first system call parameter " FORMAT_ARG "\n", (arg_t)regs->a1);
-
-    /* In thống kê */
-    printf("[sys_xxxhandler] pid=%u | pid_calls=%llu | total_calls=%llu\n",
-           pid,
-           (unsigned long long)slots[found_idx].cnt,
-           (unsigned long long)total_calls);
-
-    return 0;
+  printf ("[MMSTATS] === MEMORY STATISTICS ===\n");
+  printf ("[MMSTATS] Process PID: %d\n", proc->pid);
+  printf ("[MMSTATS] Total pages allocated: %d\n", pages_in_ram + pages_swapped);
+  printf ("[MMSTATS] Pages in RAM: %d\n", pages_in_ram);
+  printf ("[MMSTATS] Pages in SWAP: %d\n", pages_swapped);
+  
+  /* Tính toán dung lượng (PAGING_PAGESZ = 4096) */
+  printf ("[MMSTATS] Memory usage: %d pages (%d KB)\n", 
+          pages_in_ram + pages_swapped, 
+          (pages_in_ram + pages_swapped) * (PAGING_PAGESZ / 1024));
 }
 
+
+/* * __sys_xxxhandler: System Call Handler (ID: 440)
+ */
+int 
+__sys_xxxhandler (struct krnl_t *krnl, uint32_t pid, struct sc_regs *regs)
+{
+  struct pcb_t *caller = NULL;
+  struct queue_t *running_list = krnl->running_list;
+  int i;
+
+  /* Tìm PCB */
+  for (i = 0; i < running_list->size; i++) 
+    {
+      if (running_list->proc[i]->pid == pid) 
+        {
+          caller = running_list->proc[i];
+          break;
+        }
+    }
+
+  if (caller == NULL) 
+    {
+      printf ("[MMSTATS] Error: Process PID %d not found in running list.\n", pid);
+      return -1;
+    }
+
+  printf ("[DEBUG] Syscall 440 called by PID %d, params: a1=" FORMAT_ARG ", a2=" FORMAT_ARG ", a3=" FORMAT_ARG "\n",
+          pid, (arg_t)regs->a1, (arg_t)regs->a2, (arg_t)regs->a3);
+  
+  printf ("[MMSTATS] Looking for process with PID: %d\n", pid);
+  printf ("[MMSTATS] Found process %d\n", pid);
+
+  print_mm_stats (krnl, caller);
+
+  return 0;
+}

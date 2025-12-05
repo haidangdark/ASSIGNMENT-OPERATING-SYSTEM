@@ -1,0 +1,4 @@
+10 3
+alloc 4096 1
+write 10 1 0
+syscall 440 1 0 0

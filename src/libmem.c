@@ -69,6 +69,32 @@ static pthread_mutex_t mmvm_lock = PTHREAD_MUTEX_INITIALIZER;
 #include <stdio.h>
 #include <pthread.h>
 
+/* --- [OVERRIDE] GHI ĐÈ CẤU HÌNH CHO CHẾ ĐỘ 64-BIT --- */
+#ifdef MM64
+  /* 1. Ghi đè kích thước trang (4096 thay vì 256) */
+  #undef PAGING_PAGESZ
+  #define PAGING_PAGESZ PAGING64_PAGESZ 
+
+  /* 2. Ghi đè cách tính Offset (Lấy 12 bit cuối thay vì 8 bit) */
+  #undef PAGING_OFFST
+  #define PAGING_OFFST(addr)  ((addr) & PAGING64_ADDR_OFFST_MASK)
+
+  /* 3. Ghi đè cách tính số trang (Dịch 12 bit thay vì 8 bit) */
+  #undef PAGING_PGN
+  #define PAGING_PGN(addr)    ((addr) >> PAGING64_ADDR_PT_SHIFT)
+  
+  /* 4. Ghi đè các macro bit */
+  #undef PAGING_PTE_FPN
+  #define PAGING_PTE_FPN(pte) PAGING64_PTE_FPN(pte)
+  
+  #undef PAGING_PTE_PRESENT
+  #define PAGING_PTE_PRESENT(pte) PAGING64_PTE_PRESENT(pte)
+
+  #undef PAGING_PTE_SWAPPED
+  #define PAGING_PTE_SWAPPED(pte) PAGING64_PTE_SWAPPED(pte)
+#endif
+/* --------------------------------------------------- */
+
 static pthread_mutex_t mmvm_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /*enlist_vm_freerg_list - add new rg to freerg_list
@@ -393,58 +419,121 @@ int libfree(struct pcb_t *proc, uint32_t reg_index)
 int pg_getpage(struct mm_struct *mm, int pgn, int *fpn, struct pcb_t *caller)
 {
 
+//   if (!caller || !caller->krnl || !caller->krnl->mm) return -1;
+//   if (!caller->krnl->mm->pgd) {
+//     /* Chưa có bảng trang: map 1-1 tạm thời để tránh segfault */
+//     *fpn = pgn;
+//     return 0;
+//   }
+
+//   uint32_t pte = pte_get_entry(caller, pgn);
+
+//   if (!PAGING_PAGE_PRESENT(pte))
+//   { /* Page is not online, make it actively living */
+//     addr_t vicpgn, swpfpn;
+// //    addr_t vicfpn;
+// //    addr_t vicpte;
+// //  struct sc_regs regs;
+
+//     /* TODO Initialize the target frame storing our variable */
+// //  addr_t tgtfpn 
+//     (void)mm; (void)vicpgn; (void)swpfpn;
+//     *fpn = pgn;
+//     return 0;
+//     /* TODO: Play with your paging theory here */
+//     /* Find victim page */
+//     if (find_victim_page(caller->krnl->mm, &vicpgn) == -1)
+//     {
+//       return -1;
+//     }
+
+//     /* Get free frame in MEMSWP */
+//     if (MEMPHY_get_freefp(caller->krnl->active_mswp, &swpfpn) == -1)
+//     {
+//       return -1;
+//     }
+
+//     /* TODO: Implement swap frame from MEMRAM to MEMSWP and vice versa*/
+
+//     /* TODO copy victim frame to swap 
+//      * SWP(vicfpn <--> swpfpn)
+//      * SYSCALL 1 sys_memmap
+//      */
+
+
+//     /* Update page table */
+//     //pte_set_swap(...);
+
+//     /* Update its online status of the target page */
+//     //pte_set_fpn(...);
+
+//     enlist_pgn_node(&caller->krnl->mm->fifo_pgn, pgn);
+//   }
+
+//   *fpn = PAGING_FPN(pte);
+
+//   return 0;
+
+/* Guard Check */
   if (!caller || !caller->krnl || !caller->krnl->mm) return -1;
   if (!caller->krnl->mm->pgd) {
-    /* Chưa có bảng trang: map 1-1 tạm thời để tránh segfault */
-    *fpn = pgn;
+    *fpn = pgn; // Fallback map 1-1
     return 0;
   }
 
   uint32_t pte = pte_get_entry(caller, pgn);
 
+  /* Nếu trang KHÔNG có trong RAM (Page Fault) */
   if (!PAGING_PAGE_PRESENT(pte))
-  { /* Page is not online, make it actively living */
-    addr_t vicpgn, swpfpn;
-//    addr_t vicfpn;
-//    addr_t vicpte;
-//  struct sc_regs regs;
-
-    /* TODO Initialize the target frame storing our variable */
-//  addr_t tgtfpn 
-    (void)mm; (void)vicpgn; (void)swpfpn;
-    *fpn = pgn;
-    return 0;
-    /* TODO: Play with your paging theory here */
-    /* Find victim page */
-    if (find_victim_page(caller->krnl->mm, &vicpgn) == -1)
+  { 
+    addr_t new_fpn;
+    
+    /* Thử xin Frame trống trong RAM trước */
+    if (MEMPHY_get_freefp(caller->krnl->mram, &new_fpn) == 0) 
     {
-      return -1;
+        /* Có chỗ trống! Gán ngay frame này cho trang */
+        pte_set_fpn(caller, pgn, new_fpn);
+    } 
+    else 
+    {
+        /*RAM đầy -> Phải SWAP (Đuổi nạn nhân) */
+        addr_t vicpgn, swpfpn, vicfpn;
+        
+        /* Tìm nạn nhân */
+        if (find_victim_page(caller->krnl->mm, &vicpgn) == -1) return -1;
+
+        /* Tìm chỗ trên đĩa Swap */
+        if (MEMPHY_get_freefp(caller->krnl->active_mswp, &swpfpn) == -1) return -1;
+
+        /* Lấy FPN của nạn nhân */
+        uint32_t vic_pte = pte_get_entry(caller, vicpgn);
+        vicfpn = PAGING64_PTE_FPN(vic_pte);
+
+        /* Gọi Syscall để Copy RAM -> SWAP */
+        struct sc_regs regs;
+        regs.a1 = SYSMEM_SWP_OP;
+        regs.a2 = vicfpn; 
+        regs.a3 = swpfpn; 
+        if (syscall(caller->krnl, caller->pid, 17, &regs) < 0) return -1;
+
+        /* Cập nhật bảng trang của nạn nhân */
+        pte_set_swap(caller, vicpgn, 0, swpfpn);
+
+        /* Lấy frame của nạn nhân gán cho trang hiện tại */
+        new_fpn = vicfpn;
+        pte_set_fpn(caller, pgn, new_fpn);
     }
 
-    /* Get free frame in MEMSWP */
-    if (MEMPHY_get_freefp(caller->krnl->active_mswp, &swpfpn) == -1)
-    {
-      return -1;
-    }
-
-    /* TODO: Implement swap frame from MEMRAM to MEMSWP and vice versa*/
-
-    /* TODO copy victim frame to swap 
-     * SWP(vicfpn <--> swpfpn)
-     * SYSCALL 1 sys_memmap
-     */
-
-
-    /* Update page table */
-    //pte_set_swap(...);
-
-    /* Update its online status of the target page */
-    //pte_set_fpn(...);
-
+    /* Thêm vào danh sách quản lý FIFO */
     enlist_pgn_node(&caller->krnl->mm->fifo_pgn, pgn);
+    
+    *fpn = new_fpn;
+  } 
+  else 
+  {
+    /* Trang đã có trong RAM */
+    *fpn = PAGING64_PTE_FPN(pte);
   }
-
-  *fpn = PAGING_FPN(pte);
 
   return 0;
 }

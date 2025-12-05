@@ -15,9 +15,35 @@
  */
 
 #include "mm.h"
+#include"mm64.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+/* --- [OVERRIDE] GHI ĐÈ CẤU HÌNH CHO CHẾ ĐỘ 64-BIT --- */
+#ifdef MM64
+  /* 1. Ghi đè kích thước trang (4096 thay vì 256) */
+  #undef PAGING_PAGESZ
+  #define PAGING_PAGESZ PAGING64_PAGESZ 
+
+  /* 2. Ghi đè cách tính Offset (Lấy 12 bit cuối thay vì 8 bit) */
+  #undef PAGING_OFFST
+  #define PAGING_OFFST(addr)  ((addr) & PAGING64_ADDR_OFFST_MASK)
+
+  /* 3. Ghi đè cách tính số trang (Dịch 12 bit thay vì 8 bit) */
+  #undef PAGING_PGN
+  #define PAGING_PGN(addr)    ((addr) >> PAGING64_ADDR_PT_SHIFT)
+  
+  /* 4. Ghi đè các macro bit */
+  #undef PAGING_PTE_FPN
+  #define PAGING_PTE_FPN(pte) PAGING64_PTE_FPN(pte)
+  
+  #undef PAGING_PTE_PRESENT
+  #define PAGING_PTE_PRESENT(pte) PAGING64_PTE_PRESENT(pte)
+
+  #undef PAGING_PTE_SWAPPED
+  #define PAGING_PTE_SWAPPED(pte) PAGING64_PTE_SWAPPED(pte)
+#endif
+/* --------------------------------------------------- */
 
 /*
  *  MEMPHY_mv_csr - move MEMPHY cursor
