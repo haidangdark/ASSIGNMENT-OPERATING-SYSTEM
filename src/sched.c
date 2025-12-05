@@ -73,11 +73,14 @@ Cấu trúc dữ liệu chính (Biến static)
 
 #include <stdlib.h>
 #include <stdio.h>
-static struct queue_t ready_queue;
-static struct queue_t run_queue;
+static struct queue_t ready_queue; // giải thích 
+static struct queue_t run_queue; // giải thích
+static struct queue_t running_list; // giải thích 
+
+
 static pthread_mutex_t queue_lock;
 
-static struct queue_t running_list;
+
 #ifdef MLQ_SCHED
 static struct queue_t mlq_ready_queue[MAX_PRIO];
 static int slot[MAX_PRIO];
@@ -177,7 +180,7 @@ Chi tiết Code:
 struct pcb_t * get_mlq_proc(void) { // ham nay dung de lay tu hang doi (queue.h) uu tien cao nhat co tien trinh
 	struct pcb_t * proc = NULL;
 
-	pthread_mutex_lock(&queue_lock);
+	//pthread_mutex_lock(&queue_lock); // vì xài 1 cpu xử lý 1 proc (cpu 1 thread) 
 	/*TODO: get a process from PRIORITY [ready_queue].
 	 *      It worth to protect by a mechanism.
 	 * */
@@ -233,7 +236,7 @@ struct pcb_t * get_mlq_proc(void) { // ham nay dung de lay tu hang doi (queue.h)
 	if (proc != NULL)
 		enqueue(&running_list, proc);
 
-	pthread_mutex_unlock(&queue_lock);
+	//pthread_mutex_unlock(&queue_lock);
 	return proc;	
 }
 
